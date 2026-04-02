@@ -185,8 +185,14 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('whiteboard_update', ({ roomId, elements }) => {
-    socket.to(roomId).emit('whiteboard_update', elements);
+  socket.on('whiteboard_update', (payload) => {
+    socket.to(payload.roomId).emit('whiteboard_update', payload);
+  });
+
+  socket.on('ready_for_webrtc', ({ roomId }) => {
+    // Emit purely to signal that this client has initialized their camera/mic
+    // and is completely ready to receive connection offers.
+    socket.to(roomId).emit('user_ready_for_webrtc', socket.id);
   });
 
   // ── Collaborative Notes ──
