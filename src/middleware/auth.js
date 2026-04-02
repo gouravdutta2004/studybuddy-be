@@ -22,10 +22,16 @@ const protect = async (req, res, next) => {
     }
     
     // BACKEND SECURE LOCK: Walled Garden protection
-    // Block PENDING users from accessing the network API, except allowing them to fetch their base profile to know they are pending
-    if (req.user.verificationStatus === 'PENDING' && req.originalUrl !== '/api/auth/me') {
+    // Block PENDING users from the network API, EXCEPT:
+    //   - /api/auth/me              → to know their own status
+    //   - PUT /api/users/profile    → to complete onboarding after registration
+    const PENDING_ALLOW = ['/api/auth/me', '/api/users/profile'];
+    const isPendingAllowed = PENDING_ALLOW.includes(req.originalUrl.split('?')[0]) ||
+      (req.originalUrl.includes('/api/users/profile') && req.method === 'PUT');
+    if (req.user.verificationStatus === 'PENDING' && !isPendingAllowed) {
       return res.status(403).json({ message: 'Account strictly pending organizational approval.' });
     }
+
 
     next();
   } catch (err) {
