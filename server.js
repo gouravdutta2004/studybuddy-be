@@ -194,6 +194,75 @@ io.on('connection', (socket) => {
     roomNotes.set(roomId, content);
     socket.to(roomId).emit('collab_notes_update', { content });
   });
+
+  // ── Group Pomodoro ──
+  socket.on('pomodoro:sync', ({ roomId, timeLeft, running, mode }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('pomodoro:sync', { timeLeft, running, mode });
+  });
+  socket.on('pomodoro:tick', ({ roomId, timeLeft }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('pomodoro:tick', { timeLeft });
+  });
+
+  // ── Raise Hand ──
+  socket.on('hand:raise', ({ roomId, userId, name, avatar }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('hand:raise', { userId, name, avatar });
+  });
+  socket.on('hand:lower', ({ roomId, userId }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('hand:lower', { userId });
+  });
+
+  // ── Live Poll ──
+  socket.on('poll:create', ({ roomId, poll }) => {
+    if (!roomId) return;
+    // Normalize options and store server-side
+    const tracked = { ...poll, options: poll.options.map(o => ({ ...o, votes: 0, voters: [] })) };
+    if (!global.roomPolls) global.roomPolls = {};
+    global.roomPolls[roomId] = tracked;
+    // Send to everyone in the room (including creator)
+    io.to(roomId).emit('poll:new', tracked);
+  });
+  socket.on('poll:vote', ({ roomId, optionIndex, userId }) => {
+    if (!roomId) return;
+    // Track votes server-side per room (in-memory)
+    if (!global.roomPolls) global.roomPolls = {};
+    if (!global.roomPolls[roomId]) return;
+    const poll = global.roomPolls[roomId];
+    if (!poll.options[optionIndex].voters.includes(userId)) {
+      poll.options[optionIndex].votes++;
+      poll.options[optionIndex].voters.push(userId);
+      global.roomPolls[roomId] = poll;
+    }
+    io.to(roomId).emit('poll:update', poll);
+  });
+  socket.on('poll:end', ({ roomId }) => {
+    if (!roomId) return;
+    if (global.roomPolls) delete global.roomPolls[roomId];
+    io.to(roomId).emit('poll:end');
+  });
+
+  // ── Task Board ──
+  socket.on('task:add', ({ roomId, task }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('task:add', task);
+  });
+  socket.on('task:move', ({ roomId, id, col }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('task:move', { id, col });
+  });
+  socket.on('task:remove', ({ roomId, id }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('task:remove', { id });
+  });
+
+  // ── Voice Reactions ──
+  socket.on('reaction:emit', ({ roomId, emoji, color, userId }) => {
+    if (!roomId) return;
+    socket.to(roomId).emit('reaction:emit', { emoji, color, userId });
+  });
 });
 
 const PORT = process.env.PORT || 5000;
