@@ -7,6 +7,86 @@ const Endorsement = require('../models/Endorsement');
 const { protect } = require('../middleware/auth');
 const { checkAndCompleteQuest, QUEST_TYPES } = require('../utils/questEngine');
 
+/* ─────────────────────────────────────────────────────
+   Shared streak helper — SINGLE SOURCE OF TRUTH
+   Returns { streak, changed } and mutates the user doc.
+   Uses UTC calendar-day arithmetic to be timezone-safe.
+───────────────────────────────────────────────────── */
+function applyStreakLogic(user) {
+  // UTC midnight of today
+  const todayUTC = new Date();
+  todayUTC.setUTCHours(0, 0, 0, 0);
+
+  let changed = false;
+
+  if (!user.lastStudyDate) {
+    // First-ever activity
+    user.streak = 1;
+    user.lastStudyDate = new Date();
+    changed = true;
+  } else {
+    const lastUTC = new Date(user.lastStudyDate);
+    lastUTC.setUTCHours(0, 0, 0, 0);
+
+    const diffMs = todayUTC - lastUTC;
+    const diffDays = Math.round(diffMs / 86_400_000); // ms → days
+
+    if (diffDays === 0) {
+      // Already pinged today — streak unchanged, just refresh timestamp
+    } else if (diffDays === 1) {
+      // Consecutive day ✅
+      user.streak = (user.streak || 0) + 1;
+      user.lastStudyDate = new Date();
+      changed = true;
+    } else {
+      // Gap > 1 day — streak broken 💔
+      user.streak = 1;
+      user.lastStudyDate = new Date();
+      changed = true;
+    }
+  }
+
+  // Keep currentStreak in sync (legacy field)
+  user.currentStreak = user.streak;
+
+  // Streak-based badges
+  if (user.streak >= 7 && !user.badges.includes('7-Day Star'))   user.badges.push('7-Day Star');
+  if (user.streak >= 30 && !user.badges.includes('30-Day Legend')) user.badges.push('30-Day Legend');
+
+  return { streak: user.streak, changed };
+}
+
+// @route   POST /api/gamification/daily-ping
+// @desc    Called on every app-open / login to keep the streak alive.
+//          Safe to call multiple times per day (idempotent for same day).
+// @access  Private
+router.post('/daily-ping', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const { streak, changed } = applyStreakLogic(user);
+
+    // Add today to activity log (deduplicated by date)
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const alreadyLogged = user.activityLog.some(d => new Date(d).toISOString().slice(0, 10) === todayStr);
+    if (!alreadyLogged) user.activityLog.push(new Date());
+
+    if (changed) await user.save();
+
+    res.json({
+      streak,
+      lastStudyDate: user.lastStudyDate,
+      badges: user.badges,
+      xp: user.xp,
+      level: user.level,
+    });
+  } catch (err) {
+    console.error('daily-ping error:', err.message);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
 // @route   POST /api/gamification/session-end
 // @desc    Record a completed study session to update hours and streak
 // @access  Private
@@ -18,6 +98,7 @@ router.post('/session-end', protect, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     user.studyHours += (hoursStudied || 0);
+    user.totalStudyHours = (user.totalStudyHours || 0) + (hoursStudied || 0);
 
     // Auto-Sync to Active Master Goal
     if (goalId) {
@@ -30,45 +111,24 @@ router.post('/session-end', protect, async (req, res) => {
       }
     }
 
-    // Streak logic
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (user.lastStudyDate) {
-      const lastStudy = new Date(user.lastStudyDate);
-      lastStudy.setHours(0,0,0,0);
-      
-      const diffTime = today - lastStudy;
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 1) {
-        user.streak += 1;
-      } else if (diffDays > 1) {
-        user.streak = 1;
-      }
-      // diffDays === 0 means same day, streak unchanged
-    } else {
-      user.streak = 1;
-    }
-    
-    user.lastStudyDate = new Date();
+    // Use shared streak logic
+    applyStreakLogic(user);
 
-    // Award badges logic (simple example)
-    if (user.studyHours >= 10 && !user.badges.includes('Bronze Scholar')) {
-      user.badges.push('Bronze Scholar');
-    }
-    if (user.studyHours >= 50 && !user.badges.includes('Silver Scholar')) {
-      user.badges.push('Silver Scholar');
-    }
-    if (user.streak >= 7 && !user.badges.includes('7-Day Star')) {
-      user.badges.push('7-Day Star');
-    }
+    // Award badges
+    if (user.studyHours >= 10  && !user.badges.includes('Bronze Scholar')) user.badges.push('Bronze Scholar');
+    if (user.studyHours >= 50  && !user.badges.includes('Silver Scholar')) user.badges.push('Silver Scholar');
+    if (user.studyHours >= 100 && !user.badges.includes('Gold Scholar'))   user.badges.push('Gold Scholar');
 
-    // Award XP and calculate user Level
-    const earnedXp = (hoursStudied || 0) * 100; // 100 XP per study hour
-    const streakBonus = user.streak * 10; // Extra XP for consistency
+    // Award XP and level
+    const earnedXp = (hoursStudied || 0) * 100;
+    const streakBonus = user.streak * 10;
     user.xp = (user.xp || 0) + earnedXp + streakBonus;
-    user.level = Math.floor(user.xp / 100) + 1; // Level up every 100 XP
+    user.level = Math.floor(user.xp / 100) + 1;
+
+    // Activity log
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const alreadyLogged = user.activityLog.some(d => new Date(d).toISOString().slice(0, 10) === todayStr);
+    if (!alreadyLogged) user.activityLog.push(new Date());
 
     await user.save();
     
@@ -83,6 +143,7 @@ router.post('/session-end', protect, async (req, res) => {
     res.status(500).json({ message: 'Server Error' });
   }
 });
+
 
 // @route   POST /api/gamification/goals
 // @desc    Add a weekly goal
