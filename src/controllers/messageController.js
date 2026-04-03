@@ -4,6 +4,7 @@ const Admin = require('../models/Admin');
 const FlaggedItem = require('../models/FlaggedItem');
 const { sendPushToUser } = require('../utils/pushNotification');
 const { checkAndCompleteQuest } = require('../utils/questEngine');
+const { callGemini } = require('./aiController');
 
 
 const BAD_WORDS = ['spam', 'abuse', 'offensive', 'scam', 'fake', 'hate', 'slur'];
@@ -33,7 +34,11 @@ const sendMessage = async (req, res) => {
     if (!content || !receiverId) return res.status(400).json({ message: 'Missing payload' });
     
     let receiver = await User.findById(receiverId);
-    if (!receiver) receiver = await Admin.findById(receiverId);
+    let isAdminTarget = false;
+    if (!receiver) {
+       receiver = await Admin.findById(receiverId);
+       if (receiver) isAdminTarget = true;
+    }
     if (!receiver) return res.status(404).json({ message: 'Target identity not found.' });
 
     const cleanContent = await filterText(content, req.user._id, receiverId, 'Direct Message');
@@ -66,6 +71,44 @@ const sendMessage = async (req, res) => {
     checkAndCompleteQuest(req.user._id, 'SEND_MESSAGE', io).catch(() => {});
 
     res.status(201).json(msgObj);
+
+    // AI Support Agent Integration
+    if (isAdminTarget) {
+      (async () => {
+        try {
+          const prompt = `You are a helpful, professional, and friendly IT Support Agent for the "StudyFriend" student platform (aka StudyBuddyFinder).
+A user has just sent the following message/ticket to support. 
+Do your best to assist them, provide exact solutions if you can, or reassure them that the technical team will look into it if it's complex.
+Be concise, polite, and use markdown formatting.
+User's query: "${cleanContent}"
+Support Agent Response:`;
+          
+          const aiReplyText = await callGemini(prompt);
+          
+          // Save the AI message mimicking the admin
+          const aiMessage = await Message.create({ sender: receiverId, receiver: req.user._id, content: aiReplyText });
+          const aiMsgObj = aiMessage.toObject();
+          
+          aiMsgObj.sender = { _id: receiverId, name: receiver.name, avatar: receiver.avatar, isAdmin: true };
+          
+          if (io) {
+            io.to(req.user._id.toString()).emit('message_received', aiMsgObj);
+          }
+          
+          // Send push back to the user
+          sendPushToUser(req.user._id, {
+            title: `💬 Support Reply from ${receiver.name || 'System Support'}`,
+            body: aiReplyText.length > 80 ? aiReplyText.substring(0, 80) + '...' : aiReplyText,
+            icon: '/icons.svg',
+            url: '/support'
+          }).catch(() => {});
+          
+        } catch (aiErr) {
+          console.error('Support AI failed:', aiErr.message);
+        }
+      })();
+    }
+
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

@@ -227,6 +227,8 @@ function extractJSON(text) {
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
+exports.callGemini = callGemini;
+
 exports.chat = async (req, res) => {
   try {
     const { prompt, history } = req.body;
