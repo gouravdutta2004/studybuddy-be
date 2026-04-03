@@ -92,6 +92,31 @@ io.on('connection', (socket) => {
     socket.to(message.receiver).emit('message_received', message);
   });
 
+  // ── 1-on-1 WebRTC Calling (Messages) ──
+  socket.on('call_user', (data) => {
+    // data: { userToCall, signalData, from, callerInfo, isVideo }
+    // We emit to the receiver's unique user room (they joined it on 'setup')
+    socket.to(data.userToCall).emit('incoming_call', {
+      signal: data.signalData,
+      from: data.from,
+      callerInfo: data.callerInfo,
+      isVideo: data.isVideo
+    });
+  });
+
+  socket.on('answer_call', (data) => {
+    // data: { to, signal }
+    socket.to(data.to).emit('call_accepted', data.signal);
+  });
+
+  socket.on('reject_call', (data) => {
+    socket.to(data.to).emit('call_rejected');
+  });
+
+  socket.on('end_call', (data) => {
+    socket.to(data.to).emit('call_ended');
+  });
+
   socket.on('disconnect', () => {
     console.log('🔴 Socket terminated: ', socket.id);
     if (socket.userId && socket.organizationId) {

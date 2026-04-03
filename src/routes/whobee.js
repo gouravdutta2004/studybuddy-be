@@ -143,10 +143,16 @@ ${retrievedContext}
     });
 
     // Build history in Gemini format (role: user | model)
-    const history = messages.slice(0, -1).map((m) => ({
+    let history = messages.slice(0, -1).map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
     }));
+
+    // Gemini API requires the history sequence to strictly start with a 'user' turn.
+    // If our static frontend greeting ("Hey! I'm Whobee") is the first element, strip it.
+    if (history.length > 0 && history[0].role === 'model') {
+      history.shift();
+    }
 
     const chat = model.startChat({ history });
     const streamResult = await chat.sendMessageStream(latestMessage);
@@ -166,7 +172,7 @@ ${retrievedContext}
     const isRateLimit = err.message?.includes('429') || err.message?.includes('quota') || err.message?.includes('Too Many Requests');
     const friendlyMsg = isRateLimit
       ? "⚠️ I'm a bit tired right now — my AI quota has been temporarily exhausted from heavy use today! I'll be fully recharged soon. In the meantime, check the [help center](/support) or try again in a few hours! 🌙"
-      : "⚠️ I ran into a connection issue. Please ensure the server is running and try again!";
+      : `⚠️ I ran into a connection issue. Please ensure the server is running and try again! (**Debug Backend**: ${err.message})`;
 
     if (!res.headersSent) {
       // SSE not started — send as JSON fallback
