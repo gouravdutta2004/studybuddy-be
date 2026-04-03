@@ -57,6 +57,10 @@ router.get('/health', protect, admin, authorizeRole('Super Admin'), getSystemHea
 
 router.get('/reports', protect, admin, authorizeRole('Support Agent', 'Moderator'), getReports);
 router.put('/reports/:id', protect, admin, authorizeRole('Support Agent', 'Moderator'), updateReport);
+
+router.get('/feedback', protect, admin, authorizeRole('Support Agent', 'Moderator'), getFeedback);
+router.put('/feedback/:id', protect, admin, authorizeRole('Support Agent', 'Moderator'), updateFeedbackStatus);
+
 router.get('/content-scan', protect, admin, authorizeRole('Moderator'), scanContent);
 router.put('/flagged-items/:id', protect, admin, authorizeRole('Moderator'), updateFlaggedItem);
 
