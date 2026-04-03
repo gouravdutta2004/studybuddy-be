@@ -9,6 +9,8 @@ const Organization = require('../models/Organization');
 const AuditLog = require('../models/AuditLog');
 const SystemConfig = require('../models/SystemConfig');
 const Settings = require('../models/Settings');
+const StudyGroup = require('../models/StudyGroup');
+const DailyQuest = require('../models/DailyQuest');
 const mongoose = require('mongoose');
 const sendEmail = require('../utils/sendEmail');
 const os = require('os-utils');
@@ -688,6 +690,50 @@ const getGlobalPendingUsers = async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
+// ── SQUAD OVERSIGHT & GAMIFICATION ── //
+
+const getGlobalSquads = async (req, res) => {
+  try {
+    const squads = await StudyGroup.find({}).populate('creator', 'name email').populate('members', 'name email').lean();
+    res.json(squads);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+const disbandSquad = async (req, res) => {
+  try {
+    const squad = await StudyGroup.findById(req.params.id);
+    if (!squad) return res.status(404).json({ message: 'Squad not found' });
+    
+    await StudyGroup.findByIdAndDelete(req.params.id);
+    await AuditLog.create({ adminId: req.user._id, action: 'DISBAND_SQUAD', details: `Severed Squad: ${squad.name}` });
+    res.json({ message: 'Squad forced disbanded globally.' });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+const getGlobalQuests = async (req, res) => {
+  try {
+    const distinctTaskNames = await DailyQuest.distinct('task', { isCompleted: false });
+    // Aggregation could be used, but unique string pulling is extremely fast.
+    res.json(distinctTaskNames.map((task, i) => ({ _id: `q_${i}`, task, isActive: true })));
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+const injectQuest = async (req, res) => {
+  try {
+    const { task } = req.body;
+    if (!task) return res.status(400).json({ message: 'Task string required.' });
+    
+    // Inject quest directly into every functional user instance.
+    const users = await User.find({ isActive: true }).select('_id');
+    const questsToInsert = users.map(u => ({ userId: u._id, task, progress: 0, isCompleted: false }));
+    
+    await DailyQuest.insertMany(questsToInsert);
+    await AuditLog.create({ adminId: req.user._id, action: 'INJECT_QUEST', details: `Injected massive global quest: ${task}` });
+    
+    res.status(201).json({ message: `Securely injected quest to ${users.length} users.` });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
 module.exports = { 
   getUsers, updateUser, deleteUser, createUser, 
   getSystemConnections, severSystemConnection, 
@@ -700,5 +746,6 @@ module.exports = {
   getPendingUsers, approveUser, rejectUser,
   getOrgUsers, toggleOrgUserStatus, deleteOrgUser, getOrgDashboardStats,
   getGlobalOrganizations, createOrganization, updateOrganization, deleteOrganization,
-  getGlobalPendingUsers
+  getGlobalPendingUsers,
+  getGlobalSquads, disbandSquad, getGlobalQuests, injectQuest
 };
