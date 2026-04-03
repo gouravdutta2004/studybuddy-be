@@ -42,10 +42,14 @@ app.use('/api/notifications', require('./src/routes/notifications'));
 app.use('/api/calendar', require('./src/routes/calendar'));
 app.use('/api/ai', require('./src/routes/ai'));
 app.use('/api/activity', require('./src/routes/activity'));
+app.use('/api/contracts', require('./src/routes/contracts'));
 app.use('/api/billing', require('./src/routes/billing.routes'));
+app.use('/api/billing', require('./src/routes/pricingRoutes'));
 app.use('/api/push', require('./src/routes/push'));
 app.use('/api/campus', require('./src/routes/campus'));
 app.use('/api/universities', require('./src/routes/universities'));
+app.use('/api/public/stats', require('./src/routes/platformStats'));
+app.use('/api/whobee', require('./src/routes/whobee')); // Whobee RAG AI — public, no auth required
 
 app.get('/api/health', (req, res) => res.json({ status: 'OK', message: 'StudyFriend API running' }));
 
@@ -146,6 +150,44 @@ io.on('connection', (socket) => {
     // Send current collab notes to new joiner
     const currentNotes = roomNotes.get(rId) || '';
     socket.emit('collab_notes_init', { roomId: rId, content: currentNotes });
+  });
+
+  // ── SOS Breakdown Buddy System ──
+  socket.on('trigger_sos', async (payload) => {
+    try {
+      const User = require('./src/models/User'); // inline require
+      const onlineIds = Array.from(onlineUsers.keys());
+      if (onlineIds.length === 0) return;
+      
+      const experts = await User.find({
+        _id: { $in: onlineIds },
+        subjects: payload.subject,
+        _id: { $ne: payload.userId } // Don't send to self
+      });
+
+      experts.forEach(expert => {
+        const expertSocketId = onlineUsers.get(expert._id.toString());
+        if (expertSocketId) {
+          io.to(expertSocketId).emit('incoming_sos', payload);
+        }
+      });
+    } catch(err) {
+      console.error('SOS Error:', err);
+    }
+  });
+
+  socket.on('accept_sos', (payload) => {
+    // Drop both users into an instant live 1-on-1 socket room
+    const roomId = `sos_${Date.now()}`;
+    const callerSocketId = onlineUsers.get(payload.callerId);
+    
+    // Tell the caller that someone accepted, provide roomId
+    if(callerSocketId) {
+        io.to(callerSocketId).emit('sos_accepted', { roomId, helperName: payload.helperName });
+    }
+    
+    // Tell the helper to join the room
+    socket.emit('sos_accepted', { roomId, helperName: payload.helperName });
   });
 
   socket.on('leave_study_room', async ({ roomId } = {}) => {

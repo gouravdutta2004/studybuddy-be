@@ -12,7 +12,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@ai-sdk/google": "^3.0.58",
     "@google/generative-ai": "^0.24.1",
+    "@pinecone-database/pinecone": "^7.1.0",
+    "ai": "^6.0.145",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",

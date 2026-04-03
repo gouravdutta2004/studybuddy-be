@@ -55,6 +55,10 @@ const updateProfile = async (req, res) => {
       }
     });
 
+    if (req.body.studyProfile !== undefined) {
+      user.studyProfile = { ...user.studyProfile, ...req.body.studyProfile };
+    }
+
     if (user.socialLinks) {
       const count = ['github', 'linkedin', 'instagram', 'twitter', 'facebook', 'youtube']
         .filter(k => user.socialLinks[k]?.trim()).length;
@@ -88,7 +92,9 @@ const searchUsers = async (req, res) => {
 const getMatches = async (req, res) => {
   try {
     const me = await User.findById(req.user._id);
-    if (!me) return res.json([]); // Graceful fallback for Admin tokens accessing user matches
+    if (!me) return res.json([]); 
+    const isPro = me.subscription?.plan === 'pro' || me.subscription?.plan === 'squad';
+
     const excluded = [
       me._id, 
       ...me.connections, 
@@ -97,59 +103,80 @@ const getMatches = async (req, res) => {
       ...(me.skippedMatches || [])
     ];
     
-    // Fetch all active potential matches
     const query = {
-      _id: { $ne: req.user._id, $nin: excluded },
+      _id: { $nin: excluded },
       isActive: true,
-      isAdmin: { $ne: true }
+      isAdmin: { $ne: true },
+      'studyProfile.consistencyScore': { $gte: 40 } // Base rule: filter out terrible consistency
     };
 
-    // Walled Garden Entity Isolation
-    if (me.organization) {
-      query.organization = me.organization;
+    if (me.organization) query.organization = me.organization;
+
+    // Feature 4 Paywall: Exclude highly consistent users (80+) if on basic plan
+    if (!isPro) {
+      query['studyProfile.consistencyScore'] = { $gte: 40, $lte: 80 };
     }
 
-    const candidates = await User.find(query).select('-password').lean();
+    const { mode } = req.query; // ?mode=opposite
+    const myProfile = me.studyProfile || {};
+    
+    // Default zero values for missing traits
+    const myFocus = myProfile.focusSpan || '';
+    const myLearning = myProfile.learningType || '';
+    const myEnergy = myProfile.energyPeak || '';
 
-    // Scoring Engine
-    const scoredMatches = candidates.map(c => {
-      let score = 0;
+    // Aggregation Variables Based on Mode
+    const focusMatchScore = mode === 'opposite' 
+      ? { $cond: [{ $ne: ['$studyProfile.focusSpan', myFocus] }, 15, 0] } 
+      : { $cond: [{ $eq: ['$studyProfile.focusSpan', myFocus] }, 15, 0] };
+
+    const learningMatchScore = mode === 'opposite'
+      ? { $cond: [{ $ne: ['$studyProfile.learningType', myLearning] }, 15, 0] }
+      : { $cond: [{ $eq: ['$studyProfile.learningType', myLearning] }, 15, 0] };
+    
+    // Energy Peak is always exactly matched for points as requested
+    const energyMatchScore = { $cond: [{ $eq: ['$studyProfile.energyPeak', myEnergy] }, 20, 0] };
+
+    const pipeline = [
+      { $match: query },
+      { $addFields: {
+          psychScore: {
+            $add: [
+                { $cond: [{ $ne: [myFocus, ''] }, focusMatchScore, 0] },
+                { $cond: [{ $ne: [myLearning, ''] }, learningMatchScore, 0] },
+                { $cond: [{ $ne: [myEnergy, ''] }, energyMatchScore, 0] }
+            ]
+          }
+      }},
+      // Keep only matches with at least some psychological compatibility score
+      { $match: { psychScore: { $gt: 0 } } },
+      // Sort by the newly calculated score and consistency
+      { $sort: { psychScore: -1, 'studyProfile.consistencyScore': -1 } },
+      { $limit: isPro ? 20 : 3 }, // Feature 4 Paywall Limits
+      { $project: { password: 0 } }
+    ];
+
+    const aggregatedMatches = await User.aggregate(pipeline);
+
+    // Apply old logic points (subject/major) dynamically to final output
+    const finalScored = aggregatedMatches.map(c => {
+      let score = c.psychScore;
       
-      // +40% for shared subjects
       if (me.subjects && c.subjects && me.subjects.length > 0) {
         const sharedSubjects = me.subjects.filter(s => c.subjects.includes(s));
         if (sharedSubjects.length > 0) {
-           // Provide up to 40% proportional to shared subjects, or flat 40 if 100% matched
-           score += Math.min(40, (sharedSubjects.length / me.subjects.length) * 40);
+           score += Math.min(25, (sharedSubjects.length / me.subjects.length) * 25);
         }
       }
       
-      // +30% for same major
       if (me.major && c.major && me.major.trim() !== '' && me.major.toLowerCase().trim() === c.major.toLowerCase().trim()) {
-        score += 30;
-      }
-      
-      // +30% for overlapping schedules
-      if (me.availability && me.availability.length > 0 && c.availability && c.availability.length > 0) {
-        let overlapFound = false;
-        me.availability.forEach(mAvail => {
-            const hasMatch = c.availability.find(cAvail => cAvail.day === mAvail.day);
-            if (hasMatch) {
-              overlapFound = true;
-            }
-        });
-        if (overlapFound) score += 30;
+        score += 25;
       }
       
       return { ...c, matchScore: Math.round(score), matchPercentage: Math.round(score) };
-    });
+    }).sort((a,b) => b.matchPercentage - a.matchPercentage);
 
-    const filteredAndSorted = scoredMatches
-      .filter(c => c.matchScore > 0)
-      .sort((a, b) => b.matchScore - a.matchScore)
-      .slice(0, 20);
-
-    res.json(filteredAndSorted);
+    res.json(finalScored);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

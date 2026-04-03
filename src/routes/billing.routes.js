@@ -1,9 +1,38 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const SystemConfig = require('../models/SystemConfig');
 const { protect } = require('../middleware/auth');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+
+const PRICING_KEY = 'billing_pricing';
+const DEFAULT_AMOUNTS = { pro: 79900, squad: 159900 }; // paise fallback (monthly)
+
+// Helper: apply % discount
+const applyDiscount = (price, pct) => {
+  const p = Math.min(Math.max(Number(pct) || 0, 0), 100);
+  return Math.round(price * (1 - p / 100));
+};
+
+// Dynamic plan amount — reads admin-set price from DB (in paise)
+// billingCycle: 'monthly' | 'annual'
+async function getPlanAmountPaise(plan, billingCycle = 'monthly') {
+  try {
+    const config = await SystemConfig.findOne({ key: PRICING_KEY });
+    if (config?.value?.[plan]?.basePrice) {
+      const raw = config.value[plan];
+      const monthlyEffective = applyDiscount(raw.basePrice, raw.discount);
+      if (billingCycle === 'annual') {
+        const annualMonthly = applyDiscount(monthlyEffective, raw.annualDiscount);
+        return annualMonthly * 12 * 100; // 12 months in paise
+      }
+      return monthlyEffective * 100; // monthly in paise
+    }
+  } catch { /* fall through */ }
+  const fallback = DEFAULT_AMOUNTS[plan] || 0;
+  return billingCycle === 'annual' ? fallback * 12 : fallback;
+}
 
 // Determine if we are running with real Razorpay keys (test OR live)
 const keyId = process.env.RAZORPAY_KEY_ID || '';
@@ -18,7 +47,6 @@ const razorpay = REAL_KEY
     })
   : null;
 
-const PLAN_AMOUNTS = { pro: 79900, squad: 159900 }; // paise
 const PLAN_LABELS  = { basic: 'Basic', pro: 'Pro', squad: 'Squad' };
 
 // ─────────────────────────────────────────────────────────────
@@ -32,6 +60,7 @@ router.get('/status', protect, async (req, res) => {
     res.json({
       plan: user.subscription?.plan || 'basic',
       activeUntil: user.subscription?.activeUntil || null,
+      billingCycle: user.subscription?.billingCycle || 'monthly',
       isRealGateway: REAL_KEY,
     });
   } catch (err) {
@@ -49,7 +78,7 @@ router.get('/history', protect, async (req, res) => {
     const history = [];
 
     if (user?.subscription?.plan && user.subscription.plan !== 'basic') {
-      const amount = PLAN_AMOUNTS[user.subscription.plan] || 0;
+      const amount = DEFAULT_AMOUNTS[user.subscription.plan] || 0;
       history.push({
         id: `pay_hist_${user._id}`,
         date: user.subscription.activeUntil
@@ -74,26 +103,29 @@ router.get('/history', protect, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.post('/create-order', protect, async (req, res) => {
   try {
-    const { plan } = req.body;
+    const { plan, billingCycle = 'monthly' } = req.body;
 
     if (!['pro', 'squad'].includes(plan)) {
       return res.status(400).json({ message: 'Invalid or free plan — no order needed.' });
     }
+    if (!['monthly', 'annual'].includes(billingCycle)) {
+      return res.status(400).json({ message: 'Invalid billingCycle. Must be monthly or annual.' });
+    }
 
-    const amount = PLAN_AMOUNTS[plan];
+    // Always fetch the admin-controlled dynamic price
+    const amount = await getPlanAmountPaise(plan, billingCycle);
 
     if (!REAL_KEY) {
-      // Dev / demo mode — return a mock order
       return res.json({
         orderId: `order_mock_${Date.now()}`,
         amount,
         currency: 'INR',
         key_id: 'rzp_test_mock',
         isMock: true,
+        billingCycle,
       });
     }
 
-    // Real Razorpay order
     const receipt = `rcpt_${req.user.id.toString().slice(-8)}_${Date.now()}`.substring(0, 40);
     const order = await razorpay.orders.create({ amount, currency: 'INR', receipt });
 
@@ -103,6 +135,7 @@ router.post('/create-order', protect, async (req, res) => {
       currency: order.currency,
       key_id: process.env.RAZORPAY_KEY_ID,
       isMock: false,
+      billingCycle,
     });
   } catch (err) {
     console.error('Create order error:', err);
@@ -116,25 +149,22 @@ router.post('/create-order', protect, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.post('/verify', protect, async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan, isMock } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan, isMock, billingCycle = 'monthly' } = req.body;
 
     if (!['pro', 'squad'].includes(plan)) {
       return res.status(400).json({ message: 'Invalid plan for verification.' });
     }
 
     if (isMock) {
-      // Mock mode — skip signature check
-      if (razorpay_signature !== 'mock_signature') {
+      if (razorpay_signature !== 'mock_signature' && razorpay_signature !== 'mock_sig') {
         return res.status(400).json({ message: 'Invalid mock signature.' });
       }
     } else {
-      // Real signature verification
       const body   = `${razorpay_order_id}|${razorpay_payment_id}`;
       const expected = crypto
         .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
         .update(body)
         .digest('hex');
-
       if (expected !== razorpay_signature) {
         return res.status(400).json({ message: 'Payment verification failed — signature mismatch.' });
       }
@@ -144,13 +174,17 @@ router.post('/verify', protect, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const activeUntil = new Date();
-    activeUntil.setFullYear(activeUntil.getFullYear() + 1);
+    if (billingCycle === 'annual') {
+      activeUntil.setFullYear(activeUntil.getFullYear() + 1);
+    } else {
+      activeUntil.setMonth(activeUntil.getMonth() + 1);
+    }
 
-    user.subscription = { plan, activeUntil };
+    user.subscription = { plan, activeUntil, billingCycle };
     await user.save();
 
     res.json({
-      message: `🎉 Successfully upgraded to ${PLAN_LABELS[plan]}!`,
+      message: `🎉 Successfully upgraded to ${PLAN_LABELS[plan]} (${billingCycle})!`,
       subscription: user.subscription,
     });
   } catch (err) {
