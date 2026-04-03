@@ -44,9 +44,12 @@ const userSchema = new mongoose.Schema({
   level: { type: Number, default: 1 },
   badges: [{ type: String }],
   socialLinks: {
-    github: { type: String, default: '' },
-    linkedin: { type: String, default: '' },
-    instagram: { type: String, default: '' }
+    github:    { type: String, default: '' },
+    linkedin:  { type: String, default: '' },
+    instagram: { type: String, default: '' },
+    twitter:   { type: String, default: '' },
+    facebook:  { type: String, default: '' },
+    youtube:   { type: String, default: '' },
   },
   isVerified: { type: Boolean, default: false },
   weeklyGoals: [{

@@ -56,10 +56,8 @@ const updateProfile = async (req, res) => {
     });
 
     if (user.socialLinks) {
-      let count = 0;
-      if (user.socialLinks.github?.trim()) count++;
-      if (user.socialLinks.linkedin?.trim()) count++;
-      if (user.socialLinks.instagram?.trim()) count++;
+      const count = ['github', 'linkedin', 'instagram', 'twitter', 'facebook', 'youtube']
+        .filter(k => user.socialLinks[k]?.trim()).length;
       user.isVerified = count >= 2;
     }
 
