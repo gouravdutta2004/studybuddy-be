@@ -37,7 +37,7 @@ const register = async (req, res) => {
         org = await Organization.create({
           name: collegeData.name,
           domain: collegeData.domain,
-          authorizedAdmins: []
+          authorizedAdmins: [email.toLowerCase()]
         });
       }
 
@@ -267,7 +267,7 @@ const googleAuth = async (req, res) => {
           org = await Organization.create({
             name: collegeData.name,
             domain: collegeData.domain,
-            authorizedAdmins: []
+            authorizedAdmins: [email.toLowerCase()]
           });
         }
         

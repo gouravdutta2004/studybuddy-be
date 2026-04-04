@@ -50,6 +50,7 @@ app.use('/api/campus', require('./src/routes/campus'));
 app.use('/api/universities', require('./src/routes/universities'));
 app.use('/api/public/stats', require('./src/routes/platformStats'));
 app.use('/api/whobee', require('./src/routes/whobee')); // Whobee RAG AI — public, no auth required
+app.use('/api/kyc', require('./src/routes/kyc')); // Student KYC Verification
 
 app.get('/api/health', (req, res) => res.json({ status: 'OK', message: 'StudyFriend API running' }));
 

@@ -25,8 +25,8 @@ const protect = async (req, res, next) => {
     // Block PENDING users from the network API, EXCEPT:
     //   - /api/auth/me              → to know their own status
     //   - PUT /api/users/profile    → to complete onboarding after registration
-    const PENDING_ALLOW = ['/api/auth/me', '/api/users/profile'];
-    const isPendingAllowed = PENDING_ALLOW.includes(req.originalUrl.split('?')[0]) ||
+    const PENDING_ALLOW = ['/api/auth/me', '/api/users/profile', '/api/kyc/verify'];
+    const isPendingAllowed = PENDING_ALLOW.some(p => req.originalUrl.split('?')[0].startsWith(p)) ||
       (req.originalUrl.includes('/api/users/profile') && req.method === 'PUT');
     if (req.user.verificationStatus === 'PENDING' && !isPendingAllowed) {
       return res.status(403).json({ message: 'Account strictly pending organizational approval.' });

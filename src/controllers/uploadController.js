@@ -1,41 +1,42 @@
 const multer = require('multer');
+const { v2: cloudinary } = require('cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const path = require('path');
-const fs = require('fs');
 
-const uploadDir = path.join(__dirname, '../../uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const ALLOWED_MIME_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-  'application/pdf',
-  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain'
-];
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '-');
-    cb(null, `${Date.now()}-${safeName}`);
-  }
+// Configure Cloudinary with Environment Variables
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-const fileFilter = (req, file, cb) => {
-  if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`File type not allowed: ${file.mimetype}`), false);
-  }
-};
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => {
+    // Determine resource type based on mime type
+    let resource_type = 'auto'; // Images and Videos
+    if (
+      file.mimetype === 'application/pdf' || 
+      file.mimetype.includes('msword') || 
+      file.mimetype.includes('officedocument') ||
+      file.mimetype === 'text/plain'
+    ) {
+      resource_type = 'raw'; // Document formats
+    }
+
+    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '-');
+    
+    return {
+      folder: 'studybuddy_uploads',
+      resource_type: resource_type,
+      public_id: `${Date.now()}-${safeName}`,
+    };
+  },
+});
 
 const upload = multer({ 
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max file size to prevent free-tier abuse
 }).single('file');
 
 const uploadFile = (req, res) => {
@@ -46,8 +47,9 @@ const uploadFile = (req, res) => {
       return res.status(400).json({ message: err.message });
     }
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    const fileUrl = `/uploads/${req.file.filename}`;
-    res.json({ url: fileUrl, name: req.file.originalname });
+    
+    // req.file.path contains the securely hosted Cloudinary URL
+    res.json({ url: req.file.path, name: req.file.originalname });
   });
 };
 

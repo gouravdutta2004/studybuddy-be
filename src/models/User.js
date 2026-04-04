@@ -71,6 +71,11 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['USER', 'ORG_ADMIN', 'SUPER_ADMIN'], default: 'USER' },
   organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: false },
   verificationStatus: { type: String, enum: ['APPROVED', 'PENDING', 'REJECTED'], default: 'APPROVED' },
+  kycStatus: { type: String, enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED'], default: 'UNVERIFIED' },
+  verificationDetails: {
+    verifiedInstitution: { type: String, default: '' },
+    verifiedUntil: { type: Date, default: null }
+  },
   studyProfile: {
     focusSpan: { type: String, enum: ['POMODORO', 'DEEP_WORK', ''] },
     learningType: { type: String, enum: ['VISUAL', 'THEORY', 'PROBLEM_SOLVING', ''] },
