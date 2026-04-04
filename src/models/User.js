@@ -14,7 +14,6 @@ const userSchema = new mongoose.Schema({
     default: 'Undergraduate'
   },
   university: { type: String, default: '' },
-  location: { type: String, default: '' },
   studyStyle: {
     type: String,
     enum: ['Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic', 'Mixed', 'Pomodoro'],
@@ -60,10 +59,6 @@ const userSchema = new mongoose.Schema({
   }],
   activityLog: [{ type: Date }], // For GitHub-style heatmap
   timezone: { type: String, default: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
-  geoLocation: {
-    type: { type: String, enum: ['Point'] },
-    coordinates: { type: [Number] } // [lng, lat]
-  },
   subscription: {
     plan: { type: String, enum: ['basic', 'pro', 'squad'], default: 'basic' },
     activeUntil: { type: Date }
@@ -85,8 +80,6 @@ const userSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// 2dsphere index for geospatial $near queries
-userSchema.index({ geoLocation: '2dsphere' }, { sparse: true });
 
 
 userSchema.pre('save', async function () {

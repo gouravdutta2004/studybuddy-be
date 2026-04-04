@@ -289,6 +289,41 @@ io.on('connection', (socket) => {
     });
   });
 
+  // ── AI Focus Auditor Penalty ──────────────────────────────────────────────
+  // Fires when a user fails the focus check (5 min off-topic, modal dismissed 60s)
+  socket.on('focus_penalty', async ({ userId, roomId, penalty = 50 }) => {
+    try {
+      const User = require('./src/models/User');
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { $inc: { xp: -Math.abs(penalty) } },
+        { new: true, select: 'xp level name' }
+      );
+      if (!user) return;
+
+      // Never let XP go below 0
+      if (user.xp < 0) await User.findByIdAndUpdate(userId, { xp: 0 });
+
+      // Notify the penalised user
+      const userSocketId = onlineUsers.get(String(userId));
+      if (userSocketId) {
+        io.to(userSocketId).emit('xp_deducted', {
+          penalty,
+          newXp: Math.max(0, user.xp),
+          reason: 'Focus Check failed — conversation was off-topic for 5+ minutes',
+        });
+      }
+
+      // Notify the whole room so peers see the accountability
+      io.to(roomId).emit('focus_penalty_applied', {
+        userName: user.name,
+        penalty,
+      });
+    } catch (err) {
+      console.error('Focus Penalty Error:', err.message);
+    }
+  });
+
   socket.on('leave_study_room', async ({ roomId } = {}) => {
     const rId = typeof roomId === 'string' ? roomId : roomId?.roomId;
     if (!rId) return;
