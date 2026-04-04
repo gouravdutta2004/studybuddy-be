@@ -74,7 +74,8 @@ const updateProfile = async (req, res) => {
 
 const searchUsers = async (req, res) => {
   try {
-    const { subject, location, educationLevel, studyStyle, name } = req.query;
+    const { subject, location, educationLevel, studyStyle, name, _limit } = req.query;
+    const limit = _limit ? Math.min(parseInt(_limit, 10), 50) : 50;
     const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const query = { _id: { $ne: req.user._id }, isActive: true, isAdmin: { $ne: true } };
     if (subject) query.subjects = { $in: [new RegExp(escapeRegex(subject), 'i')] };
@@ -82,7 +83,7 @@ const searchUsers = async (req, res) => {
     if (educationLevel) query.educationLevel = educationLevel;
     if (studyStyle) query.studyStyle = studyStyle;
     if (name) query.name = new RegExp(escapeRegex(name), 'i');
-    const users = await User.find(query).select('-password').limit(50);
+    const users = await User.find(query).select('-password').limit(limit);
     res.json(users);
   } catch (err) {
     res.status(500).json({ message: err.message });
