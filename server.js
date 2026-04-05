@@ -51,6 +51,9 @@ app.use('/api/universities', require('./src/routes/universities'));
 app.use('/api/public/stats', require('./src/routes/platformStats'));
 app.use('/api/whobee', require('./src/routes/whobee')); // Whobee RAG AI — public, no auth required
 app.use('/api/kyc', require('./src/routes/kyc')); // Student KYC Verification
+app.use('/api/moderation', require('./src/routes/moderation')); // Trust & Safety — reports & shadowbans
+app.use('/api/compliance', require('./src/routes/compliance')); // GDPR/DPDP — data export & account deletion
+app.use('/api/study',  require('./src/routes/study'));           // Gamification Engine — XP, levels, skill mastery
 
 app.get('/api/health', (req, res) => res.json({ status: 'OK', message: 'StudyFriend API running' }));
 

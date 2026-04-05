@@ -108,6 +108,7 @@ const getMatches = async (req, res) => {
       _id: { $nin: excluded },
       isActive: true,
       isAdmin: { $ne: true },
+      isShadowBanned: { $ne: true }, // Trust & Safety: shadowbanned users never appear in discovery
       'studyProfile.consistencyScore': { $gte: 40 } // Base rule: filter out terrible consistency
     };
 

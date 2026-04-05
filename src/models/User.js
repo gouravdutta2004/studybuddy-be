@@ -77,7 +77,13 @@ const userSchema = new mongoose.Schema({
     energyPeak: { type: String, enum: ['MORNING', 'NIGHT_OWL', ''] },
     consistencyScore: { type: Number, default: 100 },
     reliabilityRating: { type: Number, default: 5.0 }
-  }
+  },
+  // ── Trust & Safety ────────────────────────────────────────────────────────
+  trustStrikes:  { type: Number, default: 0 },      // auto-incremented on each report
+  isShadowBanned: { type: Boolean, default: false }, // auto-set when strikes >= 3
+  // ── Gamification — Trophy Room ────────────────────────────────────────────
+  quizzesPassed: { type: Number, default: 0 },
+  skillMastery:  { type: Map, of: Number, default: {} }, // e.g. { "Physics": 85, "React": 40 }
 }, { timestamps: true });
 
 

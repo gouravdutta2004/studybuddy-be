@@ -11,6 +11,9 @@ router.post('/propose', protect, async (req, res) => {
     if (!targetUserId || !scheduledTime) return res.status(400).json({ message: 'Missing target user or time' });
     
     const userA = await User.findById(req.user._id);
+    if (userA.isShadowBanned) {
+      return res.status(403).json({ message: 'Your account has been restricted due to community violations. You cannot create new contracts.' });
+    }
     if (userA.xp < stakes) return res.status(400).json({ message: "You don't have enough XP for these stakes." });
 
     const contract = await Contract.create({

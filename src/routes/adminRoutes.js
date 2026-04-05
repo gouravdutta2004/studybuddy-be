@@ -7,7 +7,8 @@ const {
   getFeedback, updateFeedbackStatus, broadcastEmail,
   getDashboardStats, getUserGrowth, getSessionStats, getSystemHealth,
   getSystemConfigs, saveSystemConfig, getAuditLogs, bulkActionUsers,
-  getReports, updateReport, scanContent, updateFlaggedItem,
+  getReports, updateReport, liftShadowBan, getShadowBannedUsers,
+  scanContent, updateFlaggedItem,
   getGamificationLeaderboard, awardBadge,
   getPendingUsers, approveUser, rejectUser,
   getOrgUsers, toggleOrgUserStatus, deleteOrgUser, getOrgDashboardStats,
@@ -58,6 +59,8 @@ router.get('/health', protect, admin, authorizeRole('Super Admin'), getSystemHea
 
 router.get('/reports', protect, admin, authorizeRole('Support Agent', 'Moderator'), getReports);
 router.put('/reports/:id', protect, admin, authorizeRole('Support Agent', 'Moderator'), updateReport);
+router.get('/shadowbanned', protect, admin, authorizeRole('Moderator'), getShadowBannedUsers);
+router.put('/users/:id/lift-ban', protect, admin, authorizeRole('Super Admin', 'Moderator'), liftShadowBan);
 
 router.get('/feedback', protect, admin, authorizeRole('Support Agent', 'Moderator'), getFeedback);
 router.put('/feedback/:id', protect, admin, authorizeRole('Support Agent', 'Moderator'), updateFeedbackStatus);

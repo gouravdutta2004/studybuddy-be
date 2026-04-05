@@ -400,15 +400,51 @@ const bulkActionUsers = async (req, res) => {
 
 const getReports = async (req, res) => {
   try {
-    const reports = await Report.find({}).populate('reporter', 'name email').populate('reportedUser', 'name email').sort({ createdAt: -1 });
+    const reports = await Report.find({})
+      .populate('reporterId',     'name email avatar trustStrikes isShadowBanned')
+      .populate('reportedUserId', 'name email avatar trustStrikes isShadowBanned')
+      .populate('sessionId',      'title subject')
+      .sort({ createdAt: -1 })
+      .limit(200);
     res.json(reports);
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
 const updateReport = async (req, res) => {
   try {
-    const report = await Report.findByIdAndUpdate(req.params.id, { status: req.body.status, actionTaken: req.body.actionTaken }, { returnDocument: 'after' });
+    const report = await Report.findByIdAndUpdate(
+      req.params.id,
+      { status: req.body.status },
+      { new: true }
+    );
+    if (!report) return res.status(404).json({ message: 'Report not found' });
+    await AuditLog.create({ adminId: req.user._id, action: 'REVIEW_REPORT', details: `Marked report ${req.params.id} as ${req.body.status}` });
     res.json(report);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+// ── Lift a shadowban (clear strikes + unban) ─────────────────────────────
+const liftShadowBan = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { isShadowBanned: false, trustStrikes: 0 },
+      { new: true, select: 'name email trustStrikes isShadowBanned' }
+    );
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    await AuditLog.create({ adminId: req.user._id, action: 'LIFT_SHADOWBAN', details: `Lifted shadowban from ${user.name} (${user.email}) and reset strikes to 0` });
+    res.json({ message: `Shadowban lifted and strikes reset for ${user.name}.`, user });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+// ── Get all shadowbanned users ───────────────────────────────────────────
+const getShadowBannedUsers = async (req, res) => {
+  try {
+    const users = await User.find({ isShadowBanned: true })
+      .select('name email avatar trustStrikes isShadowBanned createdAt')
+      .sort({ trustStrikes: -1 })
+      .lean();
+    res.json(users);
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
@@ -741,7 +777,8 @@ module.exports = {
   getFeedback, updateFeedbackStatus, broadcastEmail,
   getDashboardStats, getUserGrowth, getSessionStats, getSystemHealth,
   getSystemConfigs, saveSystemConfig, getAuditLogs, bulkActionUsers,
-  getReports, updateReport, scanContent, updateFlaggedItem,
+  getReports, updateReport, liftShadowBan, getShadowBannedUsers,
+  scanContent, updateFlaggedItem,
   getGamificationLeaderboard, awardBadge,
   getPendingUsers, approveUser, rejectUser,
   getOrgUsers, toggleOrgUserStatus, deleteOrgUser, getOrgDashboardStats,
